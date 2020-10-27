@@ -3,10 +3,6 @@ import lucene
 from org.apache.lucene import document
 
 
-# from lucene import analysis, document, index, queryparser, search, store
-# from org.apache.lucene import analysis, document, index, queryparser, search, store
-
-
 class Document:
     def __init__(self, doc_id, score):
         # first argument must be of type document.Document() and you should get docid using doc.get("docid")

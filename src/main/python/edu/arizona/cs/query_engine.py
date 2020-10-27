@@ -2,7 +2,7 @@ from src.main.python.edu.arizona.cs.document import Document
 import lucene
 from org.apache.lucene import analysis, document, index, queryparser, search, store
 from org.apache.lucene.analysis.en import EnglishAnalyzer, PorterStemFilter, KStemFilter
-from org.apache.lucene.search.similarities import ClassicSimilarity  # adapted from https://stackoverflow.com/questions/43831880/pylucene-how-to-use-bm25-similarity-instead-of-tf-idf and https://stackoverflow.com/questions/39182236/how-to-rank-documents-using-tfidf-similairty-in-lucene
+from org.apache.lucene.search.similarities import ClassicSimilarity
 from lupyne import engine
 lucene.initVM()
 # References: http://lupyne.surge.sh/# and http://lupyne.surge.sh/examples.html
@@ -49,9 +49,10 @@ def pl_search_index(directory, query_text, similarity=None):
     # get to the index
     i_reader = index.DirectoryReader.open(directory)
     i_searcher = search.IndexSearcher(i_reader)
+    # adapted from https://stackoverflow.com/questions/43831880/pylucene-how-to-use-bm25-similarity-instead-of-tf-idf
+    #  and https://stackoverflow.com/questions/39182236/how-to-rank-documents-using-tfidf-similairty-in-lucene
     if similarity == 'TFIDFSimilarity':
         i_searcher.setSimilarity(ClassicSimilarity())
-
     # parse the query
     parser = queryparser.classic.QueryParser('text', analyzer)  # our field is called text
     query = parser.parse(query_text)
