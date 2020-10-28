@@ -16,5 +16,4 @@ branches:
   - main
 
 script:
-  - docker exec currim 
-  "git clone -b currim_faiz_dev https://github.com/cs4583Fall2020/hw3-python-currim19.git .; export PYTHONPATH=$PYTHONPATH:$(pwd); pytest -p no:warnings"
+  - docker exec currim "git clone -b currim_faiz_dev https://github.com/cs4583Fall2020/hw3-python-currim19.git .; export PYTHONPATH=$PYTHONPATH:$(pwd); pytest -p no:warnings"
