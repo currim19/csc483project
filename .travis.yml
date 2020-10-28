@@ -9,11 +9,11 @@ before_install:
   - pip install -U pytest
   - "export PYTHONPATH=$PYTHONPATH:$(pwd)"
   - docker pull azdb/lupyne:version2
-  - docker run azdb/lupyne:version2 /bin/sh -c "git clone -b currim_faiz_dev https://github.com/cs4583Fall2020/hw3-python-currim19.git .; export PYTHONPATH=$PYTHONPATH:$(pwd); pytest -p no:warnings"
+  - docker run --name currim azdb/lupyne:version2 /bin/sh -c "git clone -b currim_faiz_dev https://github.com/cs4583Fall2020/hw3-python-currim19.git .; export PYTHONPATH=$PYTHONPATH:$(pwd); "
 
 branches:
   only:
   - main
 
 script:
-  - docker run pytest
+  - docker exec currim "pytest -p no:warnings"
