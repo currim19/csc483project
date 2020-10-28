@@ -15,4 +15,5 @@ branches:
   only:
   - main
 
-script: pytest
+script:
+  - docker run pytest
