@@ -9,7 +9,7 @@ before_install:
   - pip install -U pytest
   - "export PYTHONPATH=$PYTHONPATH:$(pwd)"
   - docker pull azdb/lupyne:version2
-  - docker run  --env PYTHONPATH=.:$(pwd) -dit --name currim azdb/lupyne:version2
+  - docker run  --env PYTHONPATH=. -dit --name currim azdb/lupyne:version2
 
 branches:
   only:
