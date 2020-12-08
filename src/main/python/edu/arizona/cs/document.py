@@ -10,7 +10,7 @@ class Document:
         self.score = score
 
     def get(self, attribute):
-        if attribute == "doc_id" or attribute == "docid":
+        if attribute == "doc_id" or attribute == "docid" or attribute == "title":
             return self.doc_id
         if attribute == "score":
             return self.score
