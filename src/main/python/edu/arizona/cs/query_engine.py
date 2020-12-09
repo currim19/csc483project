@@ -1,21 +1,25 @@
-from src.main.python.edu.arizona.cs.document import Document
+# from src.main.python.edu.arizona.cs.document import Document
 from operator import itemgetter
 import glob
 import re
 import spacy
 import time
 import json
-import numpy as np
-import lucene
-from java.nio.file import Paths
-from org.apache.lucene import analysis, document, index, queryparser, search, store
-from org.apache.lucene.analysis.en import EnglishAnalyzer, PorterStemFilter, KStemFilter
-from org.apache.lucene.search.similarities import ClassicSimilarity
-from org.apache.lucene.store import SimpleFSDirectory
-from lupyne import engine
 
-DEFAULT_INDEX_DIRECTORY = "my_index"
+# import numpy as np
+# import lucene
+# from java.nio.file import Paths
+# from org.apache.lucene import analysis, document, index, queryparser, search, store
+# from org.apache.lucene.analysis.en import EnglishAnalyzer, PorterStemFilter, KStemFilter
+# from org.apache.lucene.search.similarities import ClassicSimilarity
+# from org.apache.lucene.store import SimpleFSDirectory
+# from lupyne import engine
+# lucene.initVM()
+
 DEFAULT_INDEX_DIRECTORY_CATS = "c_index"
+SHORT_INDEX_CATS_2K = "index2k"
+SHORT_INDEX_CATS_4K = "index4k"
+DEFAULT_INDEX_DIRECTORY = "my_index"
 ENG_INDEX_DIRECTORY = "stem_index"
 SHORT_INDEX_LEMMA_OLD = "cut_index"
 SHORT_INDEX_LEMMA = "s_index"
@@ -23,7 +27,6 @@ LONG_INDEX_LEMMA = "l_index"
 ENG_SHORT_INDEX_LEMMA = "es_index"
 ENG_LONG_INDEX_LEMMA = "el_index"
 MAX_DOC_LENGTH = 4000
-lucene.initVM()
 
 
 # References: http://lupyne.surge.sh/# and http://lupyne.surge.sh/examples.html
@@ -64,8 +67,22 @@ def text_replace_none(categories):
     return my_cat
 
 
-def remove_tpl(input_string):
-    return re.sub(r"\[tpl\](.*)\[/tpl\]", "", input_string)
+def remove_tpl(input_string):  # remove tpl, redirect tag
+    return re.sub(r"\[tpl\](.*)\[/tpl\]", "", input_string.lstrip("#REDIRECT "))
+
+
+def remove_stop_words(input_string):  # remove stop words using lucene stop word list
+    stop_words = ["a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it", "no",
+                  "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these", "they", "this",
+                  "to", "was", "will", "with"]
+    result_no_stop = []
+    # modification of https://stackoverflow.com/questions/17527741/what-is-the-default-list-of-stopwords-used-in-lucenes-stopfilter
+    # also https://medium.com/@makcedward/nlp-pipeline-stop-words-part-5-d6770df8a936
+    for word in input_string:
+        if word not in stop_words:
+            result_no_stop.append(word)
+    result_string = ' '.join(result_no_stop)
+    return result_string
 
 
 def doc_process(doc_title, doc_text, doc_length_limit, categories, headings):
@@ -84,6 +101,7 @@ def doc_process(doc_title, doc_text, doc_length_limit, categories, headings):
     # remove [tpl], then fast lemma
     # current_document = fast_lemma(remove_tpl(current_document))
     current_document = remove_tpl(current_document)
+    current_document = remove_stop_words(current_document)
     # add categories at the end
     current_document += ' ' + text_replace_none(clean_categories)
     #  docs_title_cat_text_head.append([curr_title, text_replace_none(curr_categories), current_document, text_replace_none(curr_headings)])
@@ -228,7 +246,7 @@ def check_is_categories(line):
     # is_category = False
     # note we return None if no categories, otherwise we return categories God willing
     to_return = None
-    categories = []
+    # categories = []
     strip_line = line.strip()
     cat_prefix = "CATEGORIES: "
     cat_len_prefix = len(cat_prefix)
@@ -282,7 +300,7 @@ def build_index_eng(data_files_params, data_pre_calc=None, index_directory=None)
         directory = store.RAMDirectory()
     else:
         directory = SimpleFSDirectory.open(Paths.get(index_directory))
-    analyzer = EnglishAnalyzer()
+    analyzer = EnglishAnalyzer(EnglishAnalyzer.ENGLISH_STOP_WORDS_SET)
     config = index.IndexWriterConfig(analyzer)
     # config.setOpenMode(index_mode)  - default is create / new
     # config.setSimilarity(ClassicSimilarity())  # seems to have no effect on the results
@@ -293,12 +311,13 @@ def build_index_eng(data_files_params, data_pre_calc=None, index_directory=None)
     category_index = 1
     text_index = 2
     heading_index = 3
-    i = 0
+    # i = 0
     for doc in doc_t_c_t_h_list:
         # self.indexer.add(title=doc[0], text=doc[1])
         curr_title = doc[title_index]
         curr_categories = doc[category_index]
-        curr_text = ''.join(doc[text_index]).lstrip("#REDIRECT ")   # seems to be an array for some reason
+        # curr_text = ''.join(doc[text_index]).lstrip("#REDIRECT ")  # seems to be an array for some reason / removed with tpl
+        curr_text = ''.join(doc[text_index])
         curr_headings = doc[heading_index]
         # print(curr_title, '|', curr_categories, '|', curr_headings)
         # print(curr_text)
@@ -349,6 +368,8 @@ def new_disk_indexer(directory=None):
     # my_index = engine.indexers.Indexer(directory=None, mode='a', analyzer='EnglishAnalyzer')
     if directory is None:
         my_directory = DEFAULT_INDEX_DIRECTORY  # default directory
+    else:
+        my_directory = directory
     # since new index - assume default mode is "w"
     my_mode = "w"
     # mode of "w" will create / over write. mode of 'a' will append
@@ -411,10 +432,10 @@ def build_index_std(data_files_params, data_pre_calc=None, index_directory=None,
     category_index = 1
     text_index = 2
     heading_index = 3
-    i = 0
+    # i = 0
     print("estimated len index: ", len(doc_t_c_t_h_list), " option lemma: ", do_lemma)
     for doc in doc_t_c_t_h_list:
-        curr_text = ''.join(doc[text_index]).lstrip("#REDIRECT ")   # seems to be an array
+        curr_text = ''.join(doc[text_index]).lstrip("#REDIRECT ")  # seems to be an array
         # i += 1
         # if i == 1 or i == 2 or i == 10 or i == 100 or i % 1000 == 0:
         #     print("God willing, loop: ", i, doc[title_index], ' CAT: ', doc[category_index], " H:", doc[heading_index])
@@ -422,9 +443,11 @@ def build_index_std(data_files_params, data_pre_calc=None, index_directory=None,
         # if i > 2:
         #     break
         if (do_lemma is None) or (not do_lemma):  # takes too long!!
-            my_indexer.add(title=doc[title_index], text=curr_text, categories=doc[category_index], headings=doc[heading_index])
+            my_indexer.add(title=doc[title_index], text=curr_text, categories=doc[category_index],
+                           headings=doc[heading_index])
         else:
-            my_indexer.add(title=doc[title_index], text=fast_lemma(curr_text), categories=doc[category_index], headings=doc[heading_index])
+            my_indexer.add(title=doc[title_index], text=fast_lemma(curr_text), categories=doc[category_index],
+                           headings=doc[heading_index])
     my_indexer.commit()
     print("Num index entries God willing: ", len(doc_t_c_t_h_list))
     return None
@@ -465,7 +488,9 @@ def lemma_pipe(input_doc_list):
             print(ctr, "loop, elapsed_time: %s", time.time() - start_time)
         doc_lemma_list = []
         for token in doc:
-            if not (token.pos_ == pun_pos or (token.pos_ == part_pos and token.lemma_ == "'s")):
+            if not (
+                    token.text == '\n' or token.text == '\n\n' or token.text == '\n\n\n' or token.is_stop or token.pos_ == pun_pos or (
+                    token.pos_ == part_pos and token.lemma_ == "'s")):
                 doc_lemma_list.append(token.lemma_)
         doc_lemma_string = " ".join(doc_lemma_list)
         doc_lemma_string = re.sub(' ,', '', doc_lemma_string)  # remove ', ' cases
@@ -479,7 +504,7 @@ def fast_lemma(input_string):
     nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
     query_lemma_list = []
     tokens_data = nlp(input_string)
-    i = 0
+    # i = 0
     for token in tokens_data:
         # print(token.lemma_, token.pos, token.pos_)
         query_lemma_list.append(token.lemma_)
@@ -496,7 +521,7 @@ def lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
     query = []
     pun_pos = "PUNCT"  # punctuation
     part_pos = "PART"  # particle
-    pronoun_pos = "PRON"  # pronoun
+    # pronoun_pos = "PRON"  # pronoun
     # assume can get a list of terms, convert to list if string
     if isinstance(query_data, str):
         query.append(query_data)
@@ -553,7 +578,7 @@ def get_column(list_, n):
     return map(itemgetter(n), list_)
 
 
-def parse_dump_files(text_file_list, dump_file_name, max_doc_len):
+def parse_dump_files(text_file_list, dump_file_name, max_doc_len, do_lemma=None):
     title_index = 0
     category_index = 1
     heading_index = 3
@@ -563,17 +588,21 @@ def parse_dump_files(text_file_list, dump_file_name, max_doc_len):
     doc_t_c_t_h = get_data_from_txt_files(text_file_list, max_doc_len)
     # ref: https://stackoverflow.com/questions/27745500/how-to-save-a-list-to-a-file-and-read-it-as-a-list-type
     # with open("file_parsed_json.txt", "w") as fp:
-    docs_list = get_column(doc_t_c_t_h, text_index)
-    lemmatized_docs = lemma_pipe(docs_list)
-    loop_len = len(doc_t_c_t_h)
     merged_list = []
-    if loop_len == len(lemmatized_docs):
-        for counter in range(loop_len):
-            merged_list.append(
-                [doc_t_c_t_h[counter][title_index], doc_t_c_t_h[counter][category_index], lemmatized_docs[counter],
-                 doc_t_c_t_h[counter][heading_index]])
+    if do_lemma is None:
+        merged_list = doc_t_c_t_h
     else:
-        print("mismatched list sizes.. something is wrong")
+        docs_list = get_column(doc_t_c_t_h, text_index)
+        lemmatized_docs = lemma_pipe(docs_list)
+        loop_len = len(doc_t_c_t_h)
+        if loop_len == len(lemmatized_docs):
+            for counter in range(loop_len):
+                merged_list.append(
+                    [doc_t_c_t_h[counter][title_index], doc_t_c_t_h[counter][category_index], lemmatized_docs[counter],
+                     doc_t_c_t_h[counter][heading_index]])
+        else:
+            print("mismatched list sizes.. something is wrong")
+
     # with open(dump_file_name, "w") as fp:
     #     json.dump(merged_list, fp)
     write_list_to_json(dump_file_name, merged_list)
@@ -606,8 +635,9 @@ def get_data_from_txt_files(txt_file_list, max_doc_len):
         # print(type(my_data_files))
     else:
         my_data_files = txt_file_list
-    for curr_file in txt_file_list:
+    for curr_file in my_data_files:
         doc_t_c_t_h_list += read_txt_file(curr_file, max_doc_len)
+        print("God willing processed: ", curr_file)
     return doc_t_c_t_h_list
 
 
@@ -632,7 +662,8 @@ class QueryEngine:
         if (similarity_method == "bm25") and (stem is None):
             hits = self.get_hits_bm25(query_text, search_limit_count, field_to_search)
         elif (similarity_method == "tfidf") or (stem == "English"):
-            hits = self.get_hits_flex(query_text, search_limit_count, field_to_search, sim=similarity_method, stem="English")
+            hits = self.get_hits_flex(query_text, search_limit_count, field_to_search, sim=similarity_method,
+                                      stem="English")
         # elif similarity_method == "tfidf" and (stem == "English"):
         #     hits = self.get_hits_flex(query_text, search_limit_count, field_to_search)
         else:
@@ -648,6 +679,18 @@ class QueryEngine:
             # answer = Document(hits[counter]['title'], hits[counter].score)
             answer = [hits[counter][0], hits[counter][1]]
             ans.append(answer)
+        return ans
+
+    def run_query_get_doc(self, query_text, similarity_method):
+        search_limit_count = 1
+        field_to_search = 'text'
+        hits = self.get_hits_flex(query_text, search_limit_count, field_to_search, sim=similarity_method)
+        ans = []
+        # print(hit.id, hit.score, hit['title'])
+        # answer = Document(hit['title'], hit.score)
+        # answer = Document(hits[counter]['title'], hits[counter].score)
+        answer = [hits[0][0], hits[0][1], hits[0][2]]
+        ans.append(answer)
         return ans
 
     def get_hits_bm25(self, query_text, search_limit_count, field_to_search, stem=None):
@@ -671,7 +714,7 @@ class QueryEngine:
         # print("hits details: ", len(hits), hits.count)
         return ans
 
-    def get_hits_flex(self, query_text, search_limit_count, field_to_search, sim, stem):
+    def get_hits_flex(self, query_text, search_limit_count, field_to_search, sim=None, stem=None):
         # hits = self.get_hits_flex(query_text, search_limit_count, field_to_search, sim=similarity_method, stem="English")
         # print("flex God willing: ", sim, stem, query_text)
         if stem is None:
@@ -688,8 +731,6 @@ class QueryEngine:
             i_searcher.setSimilarity(ClassicSimilarity())
         # adapted from https://stackoverflow.com/questions/43831880/pylucene-how-to-use-bm25-similarity-instead-of-tf-idf
         #  and https://stackoverflow.com/questions/39182236/how-to-rank-documents-using-tfidf-similairty-in-lucene
-        else:  # default, do nothing
-            pass
         # parse the query
         parser = queryparser.classic.QueryParser(field_to_search, analyzer)  # our field is called text
         query = parser.parse(query_text)
@@ -699,7 +740,7 @@ class QueryEngine:
             # print('hit data', hit)
             hit_doc = i_searcher.doc(hit.doc)
             # print(hit_doc['title'], hit.score)
-            answer = [hit_doc['title'], hit.score]
+            answer = [hit_doc['title'], hit.score, hit_doc[field_to_search]]
             ans.append(answer)
         i_reader.close()
         directory.close()
@@ -711,16 +752,29 @@ def build_file_dump():
     # input_path = "src/main/resources/enwiki-20140602-pages-articles.xml-0005.txt"
     # input_path = "src/main/resources/enwiki-20140602-pages-articles.xml-0006.txt"  # has cairo
     ######################################################
-    txt_files = glob.glob("src/main/resources/e*.txt")
-    # txt_files = ["src/main/resources/enwiki-20140602-pages-articles.xml-0005.txt"]
+    # txt_files = glob.glob("src/main/resources/e*.txt")
+    txt_files = ["src/main/resources/enwiki-20140602-pages-articles.xml-0005.txt"]
     # print(txt_files)
     # file dump God willing
     # short_dump_file_name = "file_parsed_json.txt"
     # long_dump_file_name = "full_file_parsed_json.txt"
     # test_dump_file_name = "file_parsed_json_test.txt"
     # parse_dump_files(txt_files, max_doc_len)
-    # parse_dump_files(txt_files, short_dump_file_name, max_doc_len)
     # parse_dump_files(txt_files, long_dump_file_name, None)
+    max_doc_len = MAX_DOC_LENGTH
+    # short_dump_file_name = "parse_json_stop_lem_4k.txt"
+    # long_dump_file_name = "parse_json_stop_lem.txt"
+    s_dump_file_stop_no_lemma = "parse_json_stop_no_lem_4k.txt"
+    l_dump_file_stop_no_lemma = "parse_json_stop_no_lem.txt"
+
+    # do_lemma = True
+    do_lemma = None
+    parse_dump_files(txt_files, s_dump_file_stop_no_lemma, max_doc_len, do_lemma)
+    parse_dump_files(txt_files, l_dump_file_stop_no_lemma, None, do_lemma)
+    # max_doc_len = 2000
+    # short_dump_file_name = "parse_json_no_lem_2k.txt"
+    # def parse_dump_files(text_file_list, dump_file_name, max_doc_len, do_lemma=None)
+    # parse_dump_files(txt_files, short_dump_file_name, max_doc_len, None)
     pass
 
 
@@ -741,13 +795,21 @@ def build_index():
     # index_to_use = ENG_INDEX_DIRECTORY
     # index_to_use = SHORT_INDEX_LEMMA
     # index_to_use = ENG_SHORT_INDEX_LEMMA
-    pre_calc_opts = {"short": {"file": "file_parsed_json.txt", "index_dir": SHORT_INDEX_LEMMA},
-                     "long": {"file": "full_file_parsed_json.txt", "index_dir": LONG_INDEX_LEMMA}}
+    # index_to_use = DEFAULT_INDEX_SHORT_CATS
+
+    # SHORT_INDEX_CATS_2K = "index2k"
+    # SHORT_INDEX_CATS_4K = "index4k"
+    pre_calc_opts = {"short": {"file": "parse_json_no_lem_2k.txt", "index_dir": SHORT_INDEX_CATS_2K},
+                     "long": {"file": "parse_json_no_lem_4k.txt", "index_dir": SHORT_INDEX_CATS_4K}}
+
+    # pre_calc_opts = {"short": {"file": "file_parsed_json.txt", "index_dir": SHORT_INDEX_LEMMA},
+    #                  "long": {"file": "full_file_parsed_json.txt", "index_dir": LONG_INDEX_LEMMA}}
     # pre_calc_opts = {"short": {"file": "file_parsed_json.txt", "index_dir": ENG_SHORT_INDEX_LEMMA}, "long": {"file": "full_file_parsed_json.txt", "index_dir": ENG_LONG_INDEX_LEMMA}}
     for opt in pre_calc_opts:
         # print("Option is: ", pre_calc_opts[opt]["file"], pre_calc_opts[opt]["index_dir"])
         # build_index_eng(data_files_params, pre_calc_opts[opt]["file"], pre_calc_opts[opt]["index_dir"])
-        build_index_std(data_files_params, pre_calc_opts[opt]["file"], pre_calc_opts[opt]["index_dir"], first_build_mode)
+        build_index_std(data_files_params, pre_calc_opts[opt]["file"], pre_calc_opts[opt]["index_dir"],
+                        first_build_mode)
     # my_analyzer = None
     # do_lemma = True
     # data_pre_calc = None
@@ -804,96 +866,119 @@ def run_questions():
     ######################################################
     # get questions
     # questions_list = get_all_questions()
-    # questions_list = get_test_question()
-    questions_list = get_failed_questions()
+    questions_list = get_test_question()
+    # questions_list = get_failed_questions()
     # for q in questions_list:
     #     print(q)
+    print("Num questions: ", len(questions_list))
     category_index = 0
     question_index = 1
     answer_index = 2
 
-    # similarity_method = "tfidf"
-    similarity_method = "bm25"
-    num_results = 10  # top ten results
+    # similarity_method = ["tfidf"]
+    similarity_method = ["bm25"]
+    # similarity_method = ["bm25", "tfidf"]
+    # num_results = 10  # top ten results
+    # num_results = 1  # top 1 results
     stem_none = None
     stem_eng = "English"
     # use_categories = ["Yes", "No"]
-    use_categories = ["Yes"]
+    # use_categories = ["Yes"]
+    use_categories = ["No"]
     # query_combinations = [{"stem": stem_none, "index": DEFAULT_INDEX_DIRECTORY_CATS},
     #                       {"stem": stem_none, "index": SHORT_INDEX_LEMMA},
     #                       {"stem": stem_none, "index": LONG_INDEX_LEMMA},
     #                       {"stem": stem_eng, "index": ENG_SHORT_INDEX_LEMMA},
     #                       {"stem": stem_eng, "index": ENG_LONG_INDEX_LEMMA}]
-    query_combinations = [{"stem": stem_eng, "index": ENG_LONG_INDEX_LEMMA}]  # best combination
+    # query_combinations = [{"stem": stem_eng, "index": ENG_LONG_INDEX_LEMMA}]  # best combination
+    # query_combinations = [{"stem": stem_none, "index": SHORT_INDEX_CATS_2K},
+    #                       {"stem": stem_none, "index": ENG_INDEX_DIRECTORY},
+    #                       {"stem": stem_eng, "index": ENG_SHORT_INDEX_LEMMA},
+    #                       {"stem": stem_eng, "index": ENG_LONG_INDEX_LEMMA}]
+    query_combinations = [{"stem": stem_eng, "index": ENG_LONG_INDEX_LEMMA}]
+
     best_score = 0
     best_opt = ""
     fail_qs = []
-    dump_file_name = "failed_questions.txt"
+    # dump_file_name = "failed_questions.txt"
     for option in query_combinations:
         curr_stem = option["stem"]
         str_curr_stem = curr_stem
         if curr_stem is None:
             str_curr_stem = "None"
         curr_index = option["index"]
+        # opt_string = "Index: " + curr_index + " Stem: " + str_curr_stem
         # print(curr_stem, curr_index)
-        for cat in use_categories:
-            opt_string = "Index: " + curr_index + " Stem: " + str_curr_stem + " use categories: " + cat
-            match_count = 0
-            fail_count = 0
-            for q in questions_list:   # for q in questions_list[1:10]:
-                curr_answer = q[answer_index]
-                curr_answer_list = curr_answer.split("|")
-                curr_category = q[category_index]
-                curr_question = q[question_index]
-                if cat == "Yes":
-                    # print("use categories, God willing")
-                    curr_question = curr_question + ' ' + curr_category.lower()
-                    if curr_index in [SHORT_INDEX_LEMMA, LONG_INDEX_LEMMA]:
-                        curr_question = lemmatize_string(curr_question)
-                        # print("Lemma, God willing")
-                clean_question = clean_query(curr_question)
-                #######################################
-                # Only use if query lemma needed
-                #  adjective, proper noun, noun
-                # lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
-                # retain_pos_tags = ['ADJ', 'PROPN', 'NOUN', 'X', 'NUM']
-                # retain_pos_tags = ['ADJ', 'PROPN', 'NOUN']
-                # word_to_keep = "token"  # word_to_keep = "lemma"
-                # if clean_question.count(' ') > 3:  # words
-                #     clean_question = lemmatize_string(clean_question, retain_pos_tags, word_to_keep)  # also lemmatize the query
-                #######################################
-                # ans1 = QueryEngine(index_to_use).run_query_bm25(curr_question)
-                # ans1 = QueryEngine(index_to_use).run_query_bm25(clean_question)
-
-                ans1 = QueryEngine(curr_index).run_query(clean_question, similarity_method, curr_stem, num_results)
-                ans_match_found = False
-                match_position = 0
-                match_score = 0
+        for sim in similarity_method:
+            for cat in use_categories:
+                opt_string = "Index: " + curr_index + " Stem: " + str_curr_stem + " use categories: " + cat + " sim: " + sim
+                match_count = 0
+                fail_count = 0
                 match_title = ""
-                match_list_str = ""
-                for a in ans1:  # God willing can uncomment later
-                    # result_title = a.get("doc_id")
-                    match_position += 1
-                    match_title = a[0]  # [title, score]
-                    match_score = a[1]
-                    match_list_str += match_title + '|' + str(match_score) + '|'
-                    # if result_title == curr_answer:
-                    if match_title in curr_answer_list:
-                        ans_match_found = True
-                        break
-                if ans_match_found:
-                    match_count += 1
-                    print("POSITION: ", match_position, "|Score: ", match_score, "|", clean_question, "|", '#'.join(curr_answer_list), "|", match_title, "|", match_list_str)
-                else:
-                    fail_count += 1
-                    print("FAIL: ", "|Score: ", match_score, "|", clean_question, "|", '#'.join(curr_answer_list), "|", "_NOT_FOUND_", "|", match_list_str)
-                    # print(clean_question, curr_answer_list, "-", result_title)
-                    fail_qs.append([q[category_index], q[question_index], q[answer_index]])
+                match_doc = ""
+                for q in questions_list:  # for q in questions_list[1:10]:
+                    curr_answer = q[answer_index]
+                    curr_answer_list = curr_answer.split("|")
+                    curr_category = q[category_index]
+                    curr_question = q[question_index]
+                    if cat == "Yes":
+                        # print("use categories, God willing")
+                        curr_question = curr_question + ' ' + curr_category.lower()
+                        if curr_index in [SHORT_INDEX_LEMMA, LONG_INDEX_LEMMA, ENG_SHORT_INDEX_LEMMA,
+                                          ENG_LONG_INDEX_LEMMA]:
+                            curr_question = lemmatize_string(curr_question)
+                            # print("Lemma, God willing")
+                    clean_question = clean_query(curr_question)
+                    #######################################
+                    # Only use if query lemma needed
+                    #  adjective, proper noun, noun
+                    # lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
+                    # retain_pos_tags = ['ADJ', 'PROPN', 'NOUN', 'X', 'NUM']
+                    # retain_pos_tags = ['ADJ', 'PROPN', 'NOUN']
+                    # word_to_keep = "token"  # word_to_keep = "lemma"
+                    # if clean_question.count(' ') > 3:  # words
+                    #     clean_question = lemmatize_string(clean_question, retain_pos_tags, word_to_keep)  # also lemmatize the query
+                    #######################################
+                    # ans1 = QueryEngine(index_to_use).run_query_bm25(curr_question)
+                    # ans1 = QueryEngine(index_to_use).run_query_bm25(clean_question)
+                    # match_count = 0
+                    # fail_count = 0
 
-            print(opt_string, "Precision @ 1 percentage (Total matches): ", match_count, "Total fails: ", fail_count)
-            if match_count > best_score:
-                best_score = match_count
-                best_opt = opt_string
+                    # ans1 = QueryEngine(curr_index).run_query(clean_question, sim, curr_stem, num_results)
+                    ans1 = QueryEngine(curr_index).run_query_get_doc(clean_question, sim)
+
+                    ans_match_found = False
+                    match_position = 0
+                    match_score = 0
+                    match_title = ""
+                    match_doc = ""
+                    match_list_str = ""
+                    for a in ans1:  # God willing can uncomment later
+                        # result_title = a.get("doc_id")
+                        match_position += 1
+                        match_title = a[0]  # [title, score]
+                        match_score = a[1]
+                        match_doc = a[2]
+                        match_list_str += match_title + '|' + str(match_score) + '|'
+                        # if result_title == curr_answer:
+                        if match_title in curr_answer_list:
+                            ans_match_found = True
+                            break
+                    if ans_match_found:
+                        match_count += 1
+                        # print("POSITION: ", match_position, "|Score: ", match_score, "|", clean_question, "|", '#'.join(curr_answer_list), "|", match_title, "|", match_list_str)
+                    else:
+                        fail_count += 1
+                        # print("FAIL: ", "|Score: ", match_score, "|", clean_question, "|", '#'.join(curr_answer_list), "|", "_NOT_FOUND_", "|", match_list_str)
+                        # print(clean_question, curr_answer_list, "-", result_title)
+                        fail_qs.append([q[category_index], q[question_index], q[answer_index]])
+                print("Title: ", match_title)
+                print("Doc: ", match_doc[0:500])
+                print(opt_string, "Precision @ 1 percentage (Total matches): ", match_count, "Total fails: ",
+                      fail_count)
+                if match_count > best_score:
+                    best_score = match_count
+                    best_opt = opt_string
     print("Best Precision @ 1 God willing: ", best_opt, "  score: ", best_score)
     # write_list_to_json(dump_file_name, fail_qs)
 
@@ -903,7 +988,7 @@ def main():
     # first process text incl. lemmatization and save locally (not docker)
     # since spacy runs faster locally than in VM
     ######################################################
-    # build_file_dump()
+    build_file_dump()
 
     ######################################################
     # next build index.
@@ -912,7 +997,13 @@ def main():
     ######################################################
     # Run Questions
     # #### Convert Questions to List #### #
-    run_questions()
+    # run_questions()
+    # "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it", "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these", "they", "this", "to", "was", "will", "with"
+    # result = "This is a test of the english stop analyzer by the people for the people if the people it no not of on such that the then ".split()
+    # stop = analysis.StopAnalyzer(EnglishAnalyzer.ENGLISH_STOP_WORDS_SET)
+    # result = analysis.StopFilter(result, EnglishAnalyzer.ENGLISH_STOP_WORDS_SET)
+    # stop_words = "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it", "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these", "they", "this", "to", "was", "will", "with"
+    # result_new = []
 
 
 if __name__ == "__main__":
