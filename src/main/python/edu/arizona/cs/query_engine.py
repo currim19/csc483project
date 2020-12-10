@@ -96,12 +96,14 @@ def remove_stop_words(input_string, custom_word_list=None):  # remove stop words
 
 def contains_stop_word(input_string, stop_word_string):
     contains_word = False
-    input_list = input_string.split()
-    stop_word_list = stop_word_string.split()
-    for word in stop_word_list:
-        if word in input_list:
+    my_input_string = input_string.lower().replace("-", " ")
+    my_stop_word_string = stop_word_string.lower().replace("-", " ")
+    my_stop_word_list = my_stop_word_string.lower().split()
+    my_input_list = my_input_string.split()
+    for word in my_stop_word_list:
+        if word in my_input_list:
             contains_word = True
-            overlap_string = "Answer: " + input_string + "| Question: " + stop_word_string
+            overlap_string = "Answer: " + my_input_string + "| Question: " + my_stop_word_string
             # print('Overlap: ', overlap_string)
             OVERLAP_ARRAY.append(overlap_string)
             break
@@ -994,9 +996,12 @@ def get_test_question():
     ######################################
     # uncomment for test run @ following lines
     question_list = []
-    curr_question = "Several bridges, including El Tahrir, cross the Nile in this capital"
-    curr_answer = "Cairo"
-    curr_category = "AFRICAN CITIES"
+    # curr_question = "Several bridges, including El Tahrir, cross the Nile in this capital"
+    # curr_answer = "Cairo"
+    # curr_category = "AFRICAN CITIES"
+    curr_question = 'In an essay defending this 2011 film, Myrlie Evers-Williams said, "My mother was" this film "& so was her mother"'
+    curr_category = "AFRICAN-AMERICAN WOMEN"
+    curr_answer = "The Help"
     question_list.append([curr_category, curr_question, curr_answer])
     # ans1 = QueryEngine(input_path).run_query(test_question)  # God willing can uncomment later (single file)
     # ans1 = QueryEngine(txt_files).run_query(test_question)  # God willing can uncomment later (single file)
@@ -1052,13 +1057,17 @@ def run_questions():
     # use_categories = ["Yes", "No"]
     # index_options = [ENG_STOP_NO_LEMMA_4K, LEMMA_4K]
     # stem_lem_options = [stem_only, spacy_lemma]
-    # use_categories = ["Yes"]
     # index_options = [ENG_STOP_NO_LEMMA_4K, LEMMA_4K]
     # stem_lem_options = ["None", stem_only, spacy_lemma]
     use_categories = ["Yes"]
-    index_options = [ENG_LONG_INDEX_LEMMA]
+    # use_categories = ["No", "Yes"]
+    index_options = [ENG_LONG_INDEX_LEMMA]  # the index with stem + lemma
+    # index_options = [ENG_INDEX_DIRECTORY]
     # stem_lem_options = ["None", spacy_lemma_relax, stem_only]
-    stem_lem_options = [stem_only, spacy_lemma_relax]
+    # stem_lem_options = ["None", stem_only, spacy_lemma_relax]
+    stem_lem_options = [stem_only]
+    # stem_lem_options = [stem_only, spacy_lemma_relax]
+    # stem_lem_options = [spacy_lemma_relax]
     best_score = 0
     best_opt = ""
     fail_qs = []
@@ -1117,7 +1126,7 @@ def run_questions():
 
                         # ans1 = QueryEngine(curr_index).run_query(clean_question, sim, curr_stem, num_results)
                         # num_results = 50
-                        num_results = 20
+                        num_results = 25
                         # print("Examining: ", clean_question)
                         # ans1 = QueryEngine(i_option).run_query_get_doc(clean_question, sim, num_results)
                         ans1 = QueryEngine(i_option).run_query_get_doc(clean_question, sim, num_results, stem_parameter)
@@ -1131,8 +1140,11 @@ def run_questions():
                             # result_title = a.get("doc_id")
                             match_position += 1
                             match_title = a[0]  # [title, score]
+                            # print("Examining answer: ", match_title)
                             # if contains_stop_word(match_title, clean_question):  # string-to-examine, stop-words
+                            # ### A_NOT_Q Block ###
                             if contains_stop_word(match_title, remove_stop_words(clean_question)):  # string-to-examine, stop-words
+                                # print(match_position, " discarding: ", match_title)
                                 continue  # get the next result
                             match_score = a[1]
                             # match_doc = a[2]
@@ -1140,7 +1152,9 @@ def run_questions():
                             # if result_title == curr_answer:
                             if match_title in curr_answer_list:
                                 ans_match_found = True
-                                break
+                            else:
+                                ans_match_found = False
+                            break  # first time you get past the stopword conditional - it's over.
                         if ans_match_found:
                             match_count += 1
                             # print("PASS: ", match_position, "|Score: ", match_score, "|", clean_question, "|", '#'.join(curr_answer_list), "|", match_title, "|", match_list_str)
@@ -1155,7 +1169,7 @@ def run_questions():
                     if match_count > best_score:
                         best_score = match_count
                         best_opt = opt_string
-    print("Best Precision @ 1 God willing: ", best_opt, "  score: ", best_score)
+    print("=============================== \nBest Precision @ 1: ", best_opt, "  score: ", best_score)
     # write_list_to_json(dump_file_name, fail_qs)
 
 
