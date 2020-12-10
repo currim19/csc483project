@@ -7,27 +7,32 @@ import time
 import json
 
 # import numpy as np
-# import lucene
-# from java.nio.file import Paths
-# from org.apache.lucene import analysis, document, index, queryparser, search, store
-# from org.apache.lucene.analysis.en import EnglishAnalyzer, PorterStemFilter, KStemFilter
-# from org.apache.lucene.search.similarities import ClassicSimilarity
-# from org.apache.lucene.store import SimpleFSDirectory
-# from lupyne import engine
-# lucene.initVM()
+import lucene
+from java.nio.file import Paths
+from org.apache.lucene import analysis, document, index, queryparser, search, store
+from org.apache.lucene.analysis.en import EnglishAnalyzer, PorterStemFilter, KStemFilter
+from org.apache.lucene.search.similarities import ClassicSimilarity
+from org.apache.lucene.store import SimpleFSDirectory
+from lupyne import engine
+lucene.initVM()
 
+DEFAULT_INDEX_DIRECTORY = "my_index"
 DEFAULT_INDEX_DIRECTORY_CATS = "c_index"
 SHORT_INDEX_CATS_2K = "index2k"
 SHORT_INDEX_CATS_4K = "index4k"
-DEFAULT_INDEX_DIRECTORY = "my_index"
 ENG_INDEX_DIRECTORY = "stem_index"
 SHORT_INDEX_LEMMA_OLD = "cut_index"
 SHORT_INDEX_LEMMA = "s_index"
 LONG_INDEX_LEMMA = "l_index"
 ENG_SHORT_INDEX_LEMMA = "es_index"
 ENG_LONG_INDEX_LEMMA = "el_index"
+ENG_STOP_NO_LEMMA = "e_stop"
+ENG_STOP_NO_LEMMA_TF = "e_stop_tf"
+ENG_STOP_NO_LEMMA_4K = "e_stop_4k"
+LEMMA_4K = "lemma4k"
+LEMMA_FULL = "lemma_full"  # uses spacy's longer stop word list
 MAX_DOC_LENGTH = 4000
-
+OVERLAP_ARRAY = []
 
 # References: http://lupyne.surge.sh/# and http://lupyne.surge.sh/examples.html
 
@@ -71,18 +76,36 @@ def remove_tpl(input_string):  # remove tpl, redirect tag
     return re.sub(r"\[tpl\](.*)\[/tpl\]", "", input_string.lstrip("#REDIRECT "))
 
 
-def remove_stop_words(input_string):  # remove stop words using lucene stop word list
-    stop_words = ["a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it", "no",
+def remove_stop_words(input_string, custom_word_list=None):  # remove stop words using lucene stop word list
+    if custom_word_list is None:
+        stop_words = ["a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it", "no",
                   "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these", "they", "this",
                   "to", "was", "will", "with"]
+    else:
+        stop_words = custom_word_list
     result_no_stop = []
     # modification of https://stackoverflow.com/questions/17527741/what-is-the-default-list-of-stopwords-used-in-lucenes-stopfilter
     # also https://medium.com/@makcedward/nlp-pipeline-stop-words-part-5-d6770df8a936
-    for word in input_string:
+    input_list = input_string.split()
+    for word in input_list:
         if word not in stop_words:
             result_no_stop.append(word)
     result_string = ' '.join(result_no_stop)
     return result_string
+
+
+def contains_stop_word(input_string, stop_word_string):
+    contains_word = False
+    input_list = input_string.split()
+    stop_word_list = stop_word_string.split()
+    for word in stop_word_list:
+        if word in input_list:
+            contains_word = True
+            overlap_string = "Answer: " + input_string + "| Question: " + stop_word_string
+            # print('Overlap: ', overlap_string)
+            OVERLAP_ARRAY.append(overlap_string)
+            break
+    return contains_word
 
 
 def doc_process(doc_title, doc_text, doc_length_limit, categories, headings):
@@ -280,7 +303,7 @@ def check_start_references(line):
 # index_directory=None, index_mode=None, analyzer=None
 # build_index_eng(None, None, data_pre_calc, index_to_use)
 # def build_index_eng(data_files, max_doc_len=None, data_pre_calc=None, index_directory=None):
-def build_index_eng(data_files_params, data_pre_calc=None, index_directory=None):
+def build_index_eng(data_files_params, data_pre_calc=None, index_directory=None, sim_method=None):
     # analyzer = analysis.standard.StandardAnalyzer()
     # analyzer = EnglishAnalyzer(Version.LUCENE_CURRENT)
     if (data_files_params is None) and (data_pre_calc is None):
@@ -302,8 +325,9 @@ def build_index_eng(data_files_params, data_pre_calc=None, index_directory=None)
         directory = SimpleFSDirectory.open(Paths.get(index_directory))
     analyzer = EnglishAnalyzer(EnglishAnalyzer.ENGLISH_STOP_WORDS_SET)
     config = index.IndexWriterConfig(analyzer)
+    if sim_method == "tfidf":
+        config.setSimilarity(ClassicSimilarity())  # seems to have no effect on the results
     # config.setOpenMode(index_mode)  - default is create / new
-    # config.setSimilarity(ClassicSimilarity())  # seems to have no effect on the results
     i_writer = index.IndexWriter(directory, config)
     print("building index God willing, english analyzer, with index_directory: ", index_directory)
     doc_counter = 0
@@ -466,6 +490,10 @@ def clean_query(query_string):
     # my_string = my_string.replace("(alex: ", " ")
     # my_string = my_string.replace('"', ' ')
     # my_string = my_string.replace("  ", " ").strip()
+    # retain double quotes as they may be useful
+    # for chk in ['\\', '!', '&', '--', "(Alex: We'll give you the ", "You give us the ", "You tell us the ",
+    #             "(alex: we'll give you the ", 'alex:', ' and ', ' not ', ' or ', '(', ')', ',', ':', '. ', '--',
+    #             '   ', '  ']:
     for chk in ['\\', '!', '&', '--', "(Alex: We'll give you the ", "You give us the ", "You tell us the ",
                 "(alex: we'll give you the ", 'alex:', ' and ', ' not ', ' or ', '(', ')', '"', ',', ':', '. ', '--',
                 '   ', '  ']:
@@ -513,7 +541,90 @@ def fast_lemma(input_string):
     return query_lemma_string
 
 
-def lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
+# def lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None, soft_rules=None):
+#     # tokenize and lemmatize the query
+#     nlp = spacy.load("en_core_web_sm")
+#     # query_lemmas = []
+#     query_lemma_string = ""
+#     query = []
+#     pun_pos = "PUNCT"  # punctuation
+#     part_pos = "PART"  # particle
+#     quote_open = False
+#     append_without_space = False
+#     # pronoun_pos = "PRON"  # pronoun
+#     # assume can get a list of terms, convert to list if string
+#     if isinstance(query_data, str):
+#         query.append(query_data)
+#     if isinstance(query_data, list):
+#         query = query_data
+#     for q_term in query:
+#         # clean_q_term = clean_query(q_term)  # already being done
+#         clean_q_term = q_term
+#         # print(clean_q_term)
+#         tokens_data = nlp(clean_q_term)
+#         # merge if compound terms
+#         query_lemma = ""
+#         i = 0
+#         for token in tokens_data:
+#             # print(token.lemma_, token.pos, token.pos_)
+#             keep_token = False
+#             if retain_pos_tags is not None:  # only keep these pos tags
+#                 for tag in retain_pos_tags:
+#                     if tag == token.pos_:
+#                         keep_token = True
+#                         break
+#             # get rid of some unhelpful parts of speech  anyway
+#             # elif token.pos_ == pun_pos or token.pos_ == pronoun_pos or (token.pos_ == part_pos and token.lemma_ == "'s"):
+#             elif soft_rules:  # is true
+#                 # print("soft rules .. ", token.text, token.lemma_)
+#                 if (token.pos_ == pun_pos and token.text != '"') or (token.pos_ == part_pos and token.lemma_ == "'s"):
+#                     # print("Skipping: ", token.text)
+#                     continue
+#                 else:
+#                     keep_token = True
+#                     if token.text == '"':
+#                         quote_open = not quote_open
+#             elif token.pos_ == pun_pos or token.is_stop or (token.pos_ == part_pos and token.lemma_ == "'s"):
+#                 # print("Skipping: ", token.text)
+#                 continue
+#             else:
+#                 keep_token = True  # don't discard this word / token
+#                 # print("keep true ..: ", token.text, token.lemma_)
+#             if keep_token:  # is true - dont throw this word away
+#                 word_to_keep = token.lemma_
+#                 if token_or_lemma == "token":
+#                     word_to_keep = token.text
+#                 if i == 0:  # first term in string
+#                     # query_lemma = token.lemma_
+#                     query_lemma = word_to_keep
+#                 else:  # second term onwards in string
+#                     # query_lemma = query_lemma + ' ' + token.lemma_
+#                     if word_to_keep == '"':
+#                         if quote_open:
+#                             append_without_space = not append_without_space
+#                             query_lemma = query_lemma + ' ' + word_to_keep
+#                         else:  # quote close
+#                             query_lemma = query_lemma + word_to_keep
+#                     else:
+#                         if append_without_space:
+#                             query_lemma = query_lemma + word_to_keep
+#                             append_without_space = not append_without_space
+#                         else:
+#                             query_lemma = query_lemma + ' ' + word_to_keep
+#                 i += 1
+#         # print("clean query: ", query_lemma)
+#         # query_lemmas.append(query_lemma)  # put in list
+#         if len(query_lemma) == 0:  # oops, we took out too much
+#             if len(tokens_data) > 0:  # non -empty
+#                 query_lemma = tokens_data[0].lemma_  # get first token
+#                 print("empty lemmas: ", query_data)
+#         query_lemma_string += query_lemma
+#         # make string
+#     # return query_lemmas
+#     # print("final doc lem: ", query_lemma_string)
+#     return query_lemma_string
+# simpler version of the lemmatization
+def lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None, soft_rules=None):
     # tokenize and lemmatize the query
     nlp = spacy.load("en_core_web_sm")
     # query_lemmas = []
@@ -521,6 +632,8 @@ def lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
     query = []
     pun_pos = "PUNCT"  # punctuation
     part_pos = "PART"  # particle
+    quote_open = False
+    append_without_space = False
     # pronoun_pos = "PRON"  # pronoun
     # assume can get a list of terms, convert to list if string
     if isinstance(query_data, str):
@@ -545,10 +658,19 @@ def lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
                         break
             # get rid of some unhelpful parts of speech  anyway
             # elif token.pos_ == pun_pos or token.pos_ == pronoun_pos or (token.pos_ == part_pos and token.lemma_ == "'s"):
-            elif token.pos_ == pun_pos or (token.pos_ == part_pos and token.lemma_ == "'s"):
+            elif soft_rules:  # is true
+                # print("soft rules .. ", token.text, token.lemma_)
+                if (token.pos_ == pun_pos) or (token.pos_ == part_pos and token.lemma_ == "'s"):
+                    # print("Skipping: ", token.text)
+                    continue
+                else:
+                    keep_token = True
+            elif token.pos_ == pun_pos or token.is_stop or (token.pos_ == part_pos and token.lemma_ == "'s"):
+                # print("Skipping: ", token.text)
                 continue
             else:
-                keep_token = True
+                keep_token = True  # don't discard this word / token
+                # print("keep true ..: ", token.text, token.lemma_)
             if keep_token:  # is true - dont throw this word away
                 word_to_keep = token.lemma_
                 if token_or_lemma == "token":
@@ -557,7 +679,6 @@ def lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
                     # query_lemma = token.lemma_
                     query_lemma = word_to_keep
                 else:  # second term onwards in string
-                    # query_lemma = query_lemma + ' ' + token.lemma_
                     query_lemma = query_lemma + ' ' + word_to_keep
                 i += 1
         # print("clean query: ", query_lemma)
@@ -571,7 +692,6 @@ def lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
     # return query_lemmas
     # print("final doc lem: ", query_lemma_string)
     return query_lemma_string
-
 
 # https://stackoverflow.com/questions/36217842/python-column-slice-of-list-of-list-matrix
 def get_column(list_, n):
@@ -681,16 +801,33 @@ class QueryEngine:
             ans.append(answer)
         return ans
 
-    def run_query_get_doc(self, query_text, similarity_method):
-        search_limit_count = 1
+    def run_query_get_doc(self, query_text, similarity_method, num_results=None, stem=None):
+        if num_results is None:
+            search_limit_count = 1
+        else:
+            search_limit_count = num_results
+        if stem is None:
+            my_stem = None
+        else:
+            my_stem = "English"
         field_to_search = 'text'
-        hits = self.get_hits_flex(query_text, search_limit_count, field_to_search, sim=similarity_method)
+        # print(query_text)
+        hits = self.get_hits_flex(query_text, search_limit_count, field_to_search, sim=similarity_method, stem=my_stem)
         ans = []
         # print(hit.id, hit.score, hit['title'])
         # answer = Document(hit['title'], hit.score)
         # answer = Document(hits[counter]['title'], hits[counter].score)
-        answer = [hits[0][0], hits[0][1], hits[0][2]]
-        ans.append(answer)
+        # answer = [hits[0][0], hits[0][1], hits[0][2]]
+        # ans.append(answer)
+        loop_len = min(search_limit_count, len(hits))
+        ans = []
+        # for hit in hits:
+        for counter in range(loop_len):
+            # print(hit.id, hit.score, hit['title'])
+            # answer = Document(hit['title'], hit.score)
+            # answer = Document(hits[counter]['title'], hits[counter].score)
+            answer = [hits[counter][0], hits[counter][1]]
+            ans.append(answer)
         return ans
 
     def get_hits_bm25(self, query_text, search_limit_count, field_to_search, stem=None):
@@ -748,12 +885,11 @@ class QueryEngine:
 
 
 def build_file_dump():
-    #     input_path = "src/main/resources/input2.txt"
     # input_path = "src/main/resources/enwiki-20140602-pages-articles.xml-0005.txt"
     # input_path = "src/main/resources/enwiki-20140602-pages-articles.xml-0006.txt"  # has cairo
     ######################################################
-    # txt_files = glob.glob("src/main/resources/e*.txt")
-    txt_files = ["src/main/resources/enwiki-20140602-pages-articles.xml-0005.txt"]
+    txt_files = glob.glob("src/main/resources/e*.txt")
+    # txt_files = ["src/main/resources/enwiki-20140602-pages-articles.xml-0005.txt"]
     # print(txt_files)
     # file dump God willing
     # short_dump_file_name = "file_parsed_json.txt"
@@ -763,14 +899,17 @@ def build_file_dump():
     # parse_dump_files(txt_files, long_dump_file_name, None)
     max_doc_len = MAX_DOC_LENGTH
     # short_dump_file_name = "parse_json_stop_lem_4k.txt"
-    # long_dump_file_name = "parse_json_stop_lem.txt"
     s_dump_file_stop_no_lemma = "parse_json_stop_no_lem_4k.txt"
     l_dump_file_stop_no_lemma = "parse_json_stop_no_lem.txt"
 
-    # do_lemma = True
-    do_lemma = None
-    parse_dump_files(txt_files, s_dump_file_stop_no_lemma, max_doc_len, do_lemma)
-    parse_dump_files(txt_files, l_dump_file_stop_no_lemma, None, do_lemma)
+    do_no_lemma = None
+    no_max_len = None
+    parse_dump_files(txt_files, s_dump_file_stop_no_lemma, max_doc_len, do_no_lemma)
+    parse_dump_files(txt_files, l_dump_file_stop_no_lemma, no_max_len, do_no_lemma)
+
+    l_dump_file_stop_lemma = "parse_json_stop_lem.txt"
+    do_lemma = True
+    parse_dump_files(txt_files, l_dump_file_stop_lemma, no_max_len, do_lemma)
     # max_doc_len = 2000
     # short_dump_file_name = "parse_json_no_lem_2k.txt"
     # def parse_dump_files(text_file_list, dump_file_name, max_doc_len, do_lemma=None)
@@ -799,17 +938,20 @@ def build_index():
 
     # SHORT_INDEX_CATS_2K = "index2k"
     # SHORT_INDEX_CATS_4K = "index4k"
-    pre_calc_opts = {"short": {"file": "parse_json_no_lem_2k.txt", "index_dir": SHORT_INDEX_CATS_2K},
-                     "long": {"file": "parse_json_no_lem_4k.txt", "index_dir": SHORT_INDEX_CATS_4K}}
-
+    # pre_calc_opts = {"short": {"file": "parse_json_stop_no_lem_4k.txt", "index_dir": ENG_STOP_NO_LEMMA_4K},
+    #                  "long": {"file": "parse_json_stop_no_lem.txt", "index_dir": ENG_STOP_NO_LEMMA}}
     # pre_calc_opts = {"short": {"file": "file_parsed_json.txt", "index_dir": SHORT_INDEX_LEMMA},
     #                  "long": {"file": "full_file_parsed_json.txt", "index_dir": LONG_INDEX_LEMMA}}
     # pre_calc_opts = {"short": {"file": "file_parsed_json.txt", "index_dir": ENG_SHORT_INDEX_LEMMA}, "long": {"file": "full_file_parsed_json.txt", "index_dir": ENG_LONG_INDEX_LEMMA}}
+    # pre_calc_opts = {"short": {"file": "parse_json_stop_lem_4k.txt", "index_dir": LEMMA_4K},
+    #                  "long": {"file": "parse_json_stop_lem.txt", "index_dir": LEMMA_FULL}}
+    pre_calc_opts = {"short": {"file": "parse_json_stop_no_lem.txt", "index_dir": ENG_STOP_NO_LEMMA_TF}}
+    sim_method = "tfidf"
+
     for opt in pre_calc_opts:
         # print("Option is: ", pre_calc_opts[opt]["file"], pre_calc_opts[opt]["index_dir"])
-        # build_index_eng(data_files_params, pre_calc_opts[opt]["file"], pre_calc_opts[opt]["index_dir"])
-        build_index_std(data_files_params, pre_calc_opts[opt]["file"], pre_calc_opts[opt]["index_dir"],
-                        first_build_mode)
+        build_index_eng(data_files_params, pre_calc_opts[opt]["file"], pre_calc_opts[opt]["index_dir"], sim_method)
+        # build_index_std(data_files_params, pre_calc_opts[opt]["file"], pre_calc_opts[opt]["index_dir"], first_build_mode)
     # my_analyzer = None
     # do_lemma = True
     # data_pre_calc = None
@@ -865,8 +1007,8 @@ def get_test_question():
 def run_questions():
     ######################################################
     # get questions
-    # questions_list = get_all_questions()
-    questions_list = get_test_question()
+    questions_list = get_all_questions()
+    # questions_list = get_test_question()
     # questions_list = get_failed_questions()
     # for q in questions_list:
     #     print(q)
@@ -874,17 +1016,17 @@ def run_questions():
     category_index = 0
     question_index = 1
     answer_index = 2
+    spacy_lemma = "lemma"
+    spacy_lemma_relax = "lemma_relax"
+    stem_only = "stem_only"
 
     # similarity_method = ["tfidf"]
     similarity_method = ["bm25"]
     # similarity_method = ["bm25", "tfidf"]
     # num_results = 10  # top ten results
     # num_results = 1  # top 1 results
-    stem_none = None
-    stem_eng = "English"
-    # use_categories = ["Yes", "No"]
     # use_categories = ["Yes"]
-    use_categories = ["No"]
+    # use_categories = ["No"]
     # query_combinations = [{"stem": stem_none, "index": DEFAULT_INDEX_DIRECTORY_CATS},
     #                       {"stem": stem_none, "index": SHORT_INDEX_LEMMA},
     #                       {"stem": stem_none, "index": LONG_INDEX_LEMMA},
@@ -895,90 +1037,124 @@ def run_questions():
     #                       {"stem": stem_none, "index": ENG_INDEX_DIRECTORY},
     #                       {"stem": stem_eng, "index": ENG_SHORT_INDEX_LEMMA},
     #                       {"stem": stem_eng, "index": ENG_LONG_INDEX_LEMMA}]
-    query_combinations = [{"stem": stem_eng, "index": ENG_LONG_INDEX_LEMMA}]
-
+    # query_combinations = [{"stem": stem_eng, "index": ENG_LONG_INDEX_LEMMA}]
+    # query_combinations = [{"stem_lem": stem_none, "index": DEFAULT_INDEX_DIRECTORY},
+    #                       {"stem_lem": stem_eng, "index": ENG_STOP_NO_LEMMA},
+    #                       {"stem_lem": stem_spacy, "index": LEMMA_FULL}]
+    # stem_combinations = [stem_eng, stem_spacy]
+    # index_options = [DEFAULT_INDEX_DIRECTORY, ENG_STOP_NO_LEMMA, LEMMA_FULL, LONG_INDEX_LEMMA, ENG_LONG_INDEX_LEMMA]
+    # index_options = [LEMMA_FULL]
+    # index_options = [DEFAULT_INDEX_DIRECTORY]
+    # index_options = [DEFAULT_INDEX_DIRECTORY_CATS]
+    # stem_lem_options = ["None", stem_only, spacy_lemma]
+    # stem_lem_options = ["None", stem_only, spacy_lemma]
+    # stem_lem_options = ["None"]
+    # use_categories = ["Yes", "No"]
+    # index_options = [ENG_STOP_NO_LEMMA_4K, LEMMA_4K]
+    # stem_lem_options = [stem_only, spacy_lemma]
+    # use_categories = ["Yes"]
+    # index_options = [ENG_STOP_NO_LEMMA_4K, LEMMA_4K]
+    # stem_lem_options = ["None", stem_only, spacy_lemma]
+    use_categories = ["Yes"]
+    index_options = [ENG_LONG_INDEX_LEMMA]
+    # stem_lem_options = ["None", spacy_lemma_relax, stem_only]
+    stem_lem_options = [stem_only, spacy_lemma_relax]
     best_score = 0
     best_opt = ""
     fail_qs = []
     # dump_file_name = "failed_questions.txt"
-    for option in query_combinations:
-        curr_stem = option["stem"]
-        str_curr_stem = curr_stem
-        if curr_stem is None:
-            str_curr_stem = "None"
-        curr_index = option["index"]
-        # opt_string = "Index: " + curr_index + " Stem: " + str_curr_stem
-        # print(curr_stem, curr_index)
-        for sim in similarity_method:
-            for cat in use_categories:
-                opt_string = "Index: " + curr_index + " Stem: " + str_curr_stem + " use categories: " + cat + " sim: " + sim
-                match_count = 0
-                fail_count = 0
-                match_title = ""
-                match_doc = ""
-                for q in questions_list:  # for q in questions_list[1:10]:
-                    curr_answer = q[answer_index]
-                    curr_answer_list = curr_answer.split("|")
-                    curr_category = q[category_index]
-                    curr_question = q[question_index]
-                    if cat == "Yes":
-                        # print("use categories, God willing")
-                        curr_question = curr_question + ' ' + curr_category.lower()
-                        if curr_index in [SHORT_INDEX_LEMMA, LONG_INDEX_LEMMA, ENG_SHORT_INDEX_LEMMA,
-                                          ENG_LONG_INDEX_LEMMA]:
-                            curr_question = lemmatize_string(curr_question)
-                            # print("Lemma, God willing")
-                    clean_question = clean_query(curr_question)
-                    #######################################
-                    # Only use if query lemma needed
-                    #  adjective, proper noun, noun
-                    # lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
-                    # retain_pos_tags = ['ADJ', 'PROPN', 'NOUN', 'X', 'NUM']
-                    # retain_pos_tags = ['ADJ', 'PROPN', 'NOUN']
-                    # word_to_keep = "token"  # word_to_keep = "lemma"
-                    # if clean_question.count(' ') > 3:  # words
-                    #     clean_question = lemmatize_string(clean_question, retain_pos_tags, word_to_keep)  # also lemmatize the query
-                    #######################################
-                    # ans1 = QueryEngine(index_to_use).run_query_bm25(curr_question)
-                    # ans1 = QueryEngine(index_to_use).run_query_bm25(clean_question)
-                    # match_count = 0
-                    # fail_count = 0
-
-                    # ans1 = QueryEngine(curr_index).run_query(clean_question, sim, curr_stem, num_results)
-                    ans1 = QueryEngine(curr_index).run_query_get_doc(clean_question, sim)
-
-                    ans_match_found = False
-                    match_position = 0
-                    match_score = 0
+    for sim in similarity_method:
+        for i_option in index_options:
+            # if curr_stem is None:
+            #     str_curr_stem = "None"
+            # curr_index = option["index"]
+            # opt_string = "Index: " + curr_index + " Stem: " + str_curr_stem
+            for stem_lem in stem_lem_options:
+                for cat in use_categories:
+                    opt_string = "Sim: " + sim + " Index: " + i_option + " Stem_Lem: " + stem_lem + " use categories: " + cat
+                    print('Starting God willing: ', opt_string)
+                    match_count = 0
+                    fail_count = 0
                     match_title = ""
                     match_doc = ""
-                    match_list_str = ""
-                    for a in ans1:  # God willing can uncomment later
-                        # result_title = a.get("doc_id")
-                        match_position += 1
-                        match_title = a[0]  # [title, score]
-                        match_score = a[1]
-                        match_doc = a[2]
-                        match_list_str += match_title + '|' + str(match_score) + '|'
-                        # if result_title == curr_answer:
-                        if match_title in curr_answer_list:
-                            ans_match_found = True
-                            break
-                    if ans_match_found:
-                        match_count += 1
-                        # print("POSITION: ", match_position, "|Score: ", match_score, "|", clean_question, "|", '#'.join(curr_answer_list), "|", match_title, "|", match_list_str)
-                    else:
-                        fail_count += 1
-                        # print("FAIL: ", "|Score: ", match_score, "|", clean_question, "|", '#'.join(curr_answer_list), "|", "_NOT_FOUND_", "|", match_list_str)
-                        # print(clean_question, curr_answer_list, "-", result_title)
-                        fail_qs.append([q[category_index], q[question_index], q[answer_index]])
-                print("Title: ", match_title)
-                print("Doc: ", match_doc[0:500])
-                print(opt_string, "Precision @ 1 percentage (Total matches): ", match_count, "Total fails: ",
-                      fail_count)
-                if match_count > best_score:
-                    best_score = match_count
-                    best_opt = opt_string
+                    for q in questions_list:  # for q in questions_list[1:10]:
+                        curr_answer = q[answer_index]
+                        curr_answer_list = curr_answer.split("|")
+                        curr_category = q[category_index]
+                        curr_question = q[question_index]
+                        if cat == "Yes":
+                            # print("use categories, God willing")
+                            # curr_question = curr_question + ' ' + curr_category
+                            curr_question = curr_question + ' ' + curr_category.lower()
+                            # if curr_index in [SHORT_INDEX_LEMMA, LONG_INDEX_LEMMA, ENG_SHORT_INDEX_LEMMA,
+                            #                   ENG_LONG_INDEX_LEMMA]:
+                            #     curr_question = lemmatize_string(curr_question)
+                            # print("Lemma, God willing")
+                        clean_question = clean_query(curr_question)
+                        stem_parameter = None
+                        if stem_lem == spacy_lemma:
+                            clean_question = lemmatize_string(clean_question)
+                        if stem_lem == stem_only:
+                            clean_question = remove_stop_words(clean_question)
+                            stem_parameter = "English"
+                        if stem_lem == spacy_lemma_relax:
+                            stem_parameter = "English"
+                            clean_question = lemmatize_string(clean_question, None, True, True)
+                        #######################################
+                        # Only use if query lemma needed
+                        #  adjective, proper noun, noun
+                        # lemmatize_string(query_data, retain_pos_tags=None, token_or_lemma=None):
+                        # retain_pos_tags = ['ADJ', 'PROPN', 'NOUN', 'X', 'NUM']
+                        # retain_pos_tags = ['ADJ', 'PROPN', 'NOUN']
+                        # word_to_keep = "token"  # word_to_keep = "lemma"
+                        # if clean_question.count(' ') > 3:  # words
+                        #     clean_question = lemmatize_string(clean_question, retain_pos_tags, word_to_keep)  # also lemmatize the query
+                        #######################################
+                        # ans1 = QueryEngine(index_to_use).run_query_bm25(curr_question)
+                        # ans1 = QueryEngine(index_to_use).run_query_bm25(clean_question)
+                        # match_count = 0
+                        # fail_count = 0
+
+                        # ans1 = QueryEngine(curr_index).run_query(clean_question, sim, curr_stem, num_results)
+                        # num_results = 50
+                        num_results = 20
+                        # print("Examining: ", clean_question)
+                        # ans1 = QueryEngine(i_option).run_query_get_doc(clean_question, sim, num_results)
+                        ans1 = QueryEngine(i_option).run_query_get_doc(clean_question, sim, num_results, stem_parameter)
+                        ans_match_found = False
+                        match_position = 0
+                        match_score = 0
+                        match_title = ""
+                        match_doc = ""
+                        match_list_str = ""
+                        for a in ans1:  # God willing can uncomment later
+                            # result_title = a.get("doc_id")
+                            match_position += 1
+                            match_title = a[0]  # [title, score]
+                            # if contains_stop_word(match_title, clean_question):  # string-to-examine, stop-words
+                            if contains_stop_word(match_title, remove_stop_words(clean_question)):  # string-to-examine, stop-words
+                                continue  # get the next result
+                            match_score = a[1]
+                            # match_doc = a[2]
+                            match_list_str += match_title + '|' + str(match_score) + '| '
+                            # if result_title == curr_answer:
+                            if match_title in curr_answer_list:
+                                ans_match_found = True
+                                break
+                        if ans_match_found:
+                            match_count += 1
+                            # print("PASS: ", match_position, "|Score: ", match_score, "|", clean_question, "|", '#'.join(curr_answer_list), "|", match_title, "|", match_list_str)
+                        else:
+                            fail_count += 1
+                            # print("FAIL: ", len(ans1), "|Score: ", match_score, "|", clean_question, "|", '#'.join(curr_answer_list), "|", "_NOT_FOUND_", "|", match_list_str)
+                            # print(clean_question, curr_answer_list, "-", result_title)
+                            fail_qs.append([q[category_index], q[question_index], q[answer_index]])
+                    # print("Title: ", match_title)
+                    # print("Doc: ", match_doc[0:500])
+                    print(opt_string, "Precision @ 1 percentage (Total matches): ", match_count, "Total fails: ", fail_count)
+                    if match_count > best_score:
+                        best_score = match_count
+                        best_opt = opt_string
     print("Best Precision @ 1 God willing: ", best_opt, "  score: ", best_score)
     # write_list_to_json(dump_file_name, fail_qs)
 
@@ -988,7 +1164,7 @@ def main():
     # first process text incl. lemmatization and save locally (not docker)
     # since spacy runs faster locally than in VM
     ######################################################
-    build_file_dump()
+    # build_file_dump()
 
     ######################################################
     # next build index.
@@ -997,7 +1173,8 @@ def main():
     ######################################################
     # Run Questions
     # #### Convert Questions to List #### #
-    # run_questions()
+    run_questions()
+    # print(OVERLAP_ARRAY)
     # "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it", "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these", "they", "this", "to", "was", "will", "with"
     # result = "This is a test of the english stop analyzer by the people for the people if the people it no not of on such that the then ".split()
     # stop = analysis.StopAnalyzer(EnglishAnalyzer.ENGLISH_STOP_WORDS_SET)
