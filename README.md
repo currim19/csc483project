@@ -21,6 +21,22 @@ Then, you can start up a new container and connect to it.
    docker exec -it csc483 bash
    ```
 
+# Clone the github repository
+
+To clone the github repository please use one of the following commands.
+
+To clone the original repository (this version has a bug that over-inflates P@1) you can use:
+   ```
+   git clone https://github.com/currim19/csc483project.git
+   ```
+
+To clone the current version, please use:
+   ```
+   git clone https://github.com/currim19/csc483project.git/ --branch currim_faiz_post
+   ```
+
+
+
 # Download (or build) PyLucene index
 
 A collection of pre-built indexes are available on box.arizona.edu. The URL is in the project report.
